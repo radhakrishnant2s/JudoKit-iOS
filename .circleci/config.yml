@@ -169,7 +169,11 @@ workflows:
   version: 2
   build:
     jobs:
+      - carthage_update
+      - bundle_install
       - build_sdk:
+          requires:
+            - carthage_update
           filters:
             tags:
               only:
