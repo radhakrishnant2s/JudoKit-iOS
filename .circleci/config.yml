@@ -5,6 +5,19 @@ executors:
     macos:
       xcode: 11.3.0
 
+commands:
+  install_sonar_build_wrapper:
+    steps:
+      - run:
+          name: Install Sonar Build Wrapper
+          command: |
+            export SONARSCANNER_VERSION=4.3.0.2102
+            curl -o /var/tmp/build-wrapper-macosx-x86.zip https://sonarcloud.io/static/cpp/build-wrapper-macosx-x86.zip
+            unzip /var/tmp/build-wrapper-macosx-x86.zip -d /var/tmp
+            sudo mv /var/tmp/build-wrapper-macosx-x86/* /opt/sonar-scanner-${SONARSCANNER_VERSION}-macosx/bin/
+            rm -rf /var/tmp/build-wrapper-macosx-x86
+            ln -s /opt/sonar-scanner-${SONARSCANNER_VERSION}-macosx/bin/build-wrapper-macosx-x86 /usr/local/bin/build-wrapper-macosx-x86
+
 jobs:
   build_sdk:
     executor: macos
@@ -28,119 +41,90 @@ jobs:
       #     paths:
       #       - judokit-android/build
 
-  # Add below as additional command once instrumented tests are added
-  # ./gradlew :judokit-android-examples:assembleReleaseAndroidTest
-  # build_sample:
-  #   executor: android
-  #   steps:
-  #     - disable_predex
-  #     - checkout
-  #     - restore_cache:
-  #         keys:
-  #           - judokit-android-examples-{{ checksum "judokit-android-examples/build.gradle" }}
-  #     - run:
-  #         name: Build Sample App APK
-  #         command: |
-  #           ./gradlew :judokit-android-examples:assembleRelease
-  #     - save_cache:
-  #         key: judokit-android-examples-{{ checksum "judokit-android-examples/build.gradle" }}
-  #         paths:
-  #           - ./build/cache
-  #     - persist_to_workspace:
-  #         root: .
-  #         paths:
-  #           - judokit-android-examples/build
+  build_sample:
+    executor: macos
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /home/circleci/project
+      - run:
+          name: Build Sample App
+          command: |
+            echo 1
 
-  # unit_test_sdk:
-  #   executor: android
-  #   steps:
-  #     - checkout
-  #     - attach_workspace:
-  #         at: /home/circleci/project
-  #     - disable_predex
-  #     - run:
-  #         name: Run SDK Unit Tests
-  #         command: ./gradlew :judokit-android:test generateCodeAnalysisReport
+  unit_test_sdk:
+    executor: macos
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /home/circleci/project
+      - install_sonar_build_wrapper
+      - run:
+          name: Run SDK Unit Tests
+          command: |
+            build-wrapper-macosx-x86 --out-dir output bundle exec fastlane test
+
+  validate_podspec:
+    executor: macos
+    steps:
+      - checkout
+      - run:
+          name: Validate PodSpec
+          command: pod lib lint --no-subspecs --allow-warnings
 
   # Below step not currently used as no unit tests have been written
   # unit_test_sample:
-  #   executor: android
-  #   steps:
-  #     - attach_workspace:
-  #         at: /home/circleci/project
-  #     - disable_predex
-  #     - run:
-  #         name: Run Sample App Unit Tests
-  #         command: ./gradlew :judokit-android-examples:test
 
   # Below step not currently used as no instrumented tests have been written
   # instrumented_test_sample:
-  #   executor: android
-  #   steps:
-  #     - attach_workspace:
-  #         at: /home/circleci/project
-  #     - run:
-  #         name: Store Google Service Account
-  #         command: echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
-  #     - run:
-  #         name: Authorize gcloud and set config defaults
-  #         command: |
-  #           sudo gcloud auth activate-service-account --key-file=${HOME}/gcloud-service-key.json
-  #           sudo gcloud --quiet config set project ${GOOGLE_PROJECT_ID}
-  #     - run:
-  #         name: Test with Firebase Test Lab
-  #         command: >
-  #           gcloud firebase test android run \
-  #             --app judokit-android-examples/build/outputs/apk/debug/judokit-android-examples-debug.apk \
-  #             --test judokit-android-examples/build/outputs/apk/androidTest/debug/judokit-android-examples-debug-androidTest.apk
 
-  # sonar_scan:
-  #   docker:
-  #     - image: gcr.io/opnf-management/sonar-scanner:latest
-  #       auth:
-  #         username: _json_key
-  #         password: $GCLOUD_SERVICE_KEY
-  #   working_directory: /home/circleci/project
-  #   steps:
-  #     - checkout
-  #     - attach_workspace:
-  #         at: /home/circleci/project
-  #     - run: /opt/run-scan.sh
+  sonar_scan:
+    docker:
+      - image: gcr.io/opnf-management/sonar-scanner:latest
+        auth:
+          username: _json_key
+          password: $GCLOUD_SERVICE_KEY
+    working_directory: /home/circleci/project
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /home/circleci/project
+      - run: /opt/run-scan.sh
 
-  # release_sample:
-  #   executor: android
-  #   steps:
-  #     - checkout
-  #     - attach_workspace:
-  #         at: /home/circleci/project
-  #     - run:
-  #         name: Install Firebase CLI
-  #         command: curl -sL https://firebase.tools | bash
-  #     - run:
-  #         name: Store Google Service Account
-  #         command: |
-  #           echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
-  #     - run:
-  #         name: Create Release Notes
-  #         command: echo "$(git log -1 --pretty=format:"%b")" > ./notes.txt
-  #     - run:
-  #         name: Distribute Sample App
-  #         command: |
-  #           export GOOGLE_APPLICATION_CREDENTIALS=${HOME}/gcloud-service-key.json
-  #           firebase appdistribution:distribute \
-  #             judokit-android-examples/build/outputs/apk/release/judokit-android-examples-release-unsigned.apk \
-  #             --app "$ANDROID_FIREBASE_APP_ID" \
-  #             --groups "default-testers" \
-  #             --release-notes-file ./notes.txt
+  release_sample:
+    executor: macos
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /home/circleci/project
+      - run:
+          name: Install Firebase CLI
+          command: curl -sL https://firebase.tools | bash
+      - run:
+          name: Store Google Service Account
+          command: |
+            echo $GCLOUD_SERVICE_KEY > ${HOME}/gcloud-service-key.json
+      - run:
+          name: Create Release Notes
+          command: echo "$(git log -1 --pretty=format:"%b")" > ./notes.txt
+      - run:
+          name: Distribute Sample App
+          command: |
+            export GOOGLE_APPLICATION_CREDENTIALS=${HOME}/gcloud-service-key.json
+            firebase appdistribution:distribute \
+              somepackage \
+              --app "$IOS_FIREBASE_APP_ID" \
+              --groups "default-testers" \
+              --release-notes-file ./notes.txt
 
-  # release_sdk:
-  #   executor: android
-  #   steps:
-  #     - attach_workspace:
-  #         at: /home/circleci/project
-  #     - run:
-  #         name: Release SDK to Bintray
-  #         command: ./gradlew bintrayUpload -PbintrayUser=$BINTRAY_USER -PbintrayKey=$BINTRAY_API_KEY -PdryRun=false
+  release_sdk:
+    executor: macos
+    steps:
+      - attach_workspace:
+          at: /home/circleci/project
+      - run:
+          name: Release SDK to CocoaPods
+          command: pod trunk push JudoKit-iOS.podspec --allow-warnings
 
 workflows:
   version: 2
@@ -151,29 +135,31 @@ workflows:
             tags:
               only:
                 - /^v((\d)+\.){1,2}(\d+)/i
-      # - build_sample
-      # - unit_test_sdk:
-      #     requires:
-      #       - build_sdk
-      # - sonar_scan:
-      #     context: shared-secrets
-      #     requires:
-      #       - unit_test_sdk
-      # - release_sample:
-      #     context: shared-secrets
-      #     requires:
-      #       - build_sample
-      #       - unit_test_sdk
-      #     filters:
-      #       branches:
-      #         only:
-      #           - master
-      # - release_sdk:
-      #     context: shared-secrets
-      #     filters:
-      #       branches:
-      #         ignore:
-      #           - /.*/
-      #       tags:
-      #         only:
-      #           - /^v((\d)+\.){1,2}(\d+)/i
+      - build_sample
+      - unit_test_sdk:
+          requires:
+            - build_sdk
+      - validate_podspec
+      - sonar_scan:
+          context: shared-secrets
+          requires:
+            - unit_test_sdk
+      - release_sample:
+          context: shared-secrets
+          requires:
+            - build_sample
+            - unit_test_sdk
+            - validate_podspec
+          filters:
+            branches:
+              only:
+                - master
+      - release_sdk:
+          context: shared-secrets
+          filters:
+            branches:
+              ignore:
+                - /.*/
+            tags:
+              only:
+                - /^v((\d)+\.){1,2}(\d+)/i
