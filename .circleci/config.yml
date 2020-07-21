@@ -14,6 +14,7 @@ jobs:
           keys:
             - judokit-ios-carthage-{{ checksum "Cartfile" }}
             - judokit-ios-carthagekit-{{ checksum "Cartfile" }}
+            - judokit-ios-carthagecache-{{ checksum "Cartfile" }}
       - run:
           name: Carthage Update
           command: carthage update
@@ -25,10 +26,10 @@ jobs:
           key: judokit-ios-carthagekit-{{ checksum "Cartfile" }}
           paths:
             - ~/Library/Caches/org.carthage.CarthageKit
-      # - save_cache:
-      #     key: judokit-ios-{{ checksum "Cartfile" }}-2
-      #     paths:
-      #       - ~/Library/Caches/carthage
+      - save_cache:
+          key: judokit-ios-carthagecache-{{ checksum "Cartfile" }}
+          paths:
+            - ~/Library/Caches/carthage
   bundle_install:
     executor: macos
     steps:
