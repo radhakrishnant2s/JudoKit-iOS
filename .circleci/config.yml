@@ -12,13 +12,13 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - judokit-ios-{{ checksum "Cartfile" }}
+            - judokit-ios-carthage-{{ checksum "Cartfile" }}
           #  - judokit-ios-{{ checksum "Cartfile" }}-2
       - run:
           name: Carthage Update
           command: carthage update
       - save_cache:
-          key: judokit-ios-{{ checksum "Cartfile" }}
+          key: judokit-ios-carthage-{{ checksum "Cartfile" }}
           paths:
             - Carthage
       # - save_cache:
@@ -48,7 +48,7 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - judokit-ios-{{ checksum "Cartfile" }}
+            - judokit-ios-carthage-{{ checksum "Cartfile" }}
       - run:
           name: Build SDK
           command: |
