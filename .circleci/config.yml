@@ -5,65 +5,106 @@ executors:
     macos:
       xcode: 11.3.0
 
-commands:
-  install_sonar_build_wrapper:
+jobs:
+  carthage_update:
+    executor: macos
     steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - judokit-ios-{{ checksum "Cartfile" }}
+      - run:
+          name: Carthage Update
+          command: carthage update
+      - save_cache:
+          key: judokit-ios-{{ checksum "Cartfile" }}
+          paths:
+            - ~/Library/Caches/org.carthage.CarthageKit
+  bundle_install:
+    executor: macos
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - judokit-ios-{{ checksum "Gemfile" }}
+      - run:
+          name: Bundle Install
+          command: bundle install
+      - save_cache:
+          key: judokit-ios-{{ checksum "Gemfile" }}
+          paths: ~/.bundle/cache
+  build_sdk:
+    executor: macos
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - judokit-ios-{{ checksum "Cartfile" }}
+      - run:
+          name: Build SDK
+          command: |
+            xcodebuild clean build \
+              -project JudoKit_iOS.xcodeproj \
+              -scheme JudoKit_iOS \
+              -configuration Release \
+              -sdk iphonesimulator \
+              -derivedDataPath DerivedData
+      - persist_to_workspace:
+          root: .
+          paths:
+            - DerivedData
+  build_sample:
+    executor: macos
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - judokit-ios-{{ checksum "Cartfile" }}
+      - run:
+          name: Build Sample App
+          command: |
+            cd Examples/ObjectiveCExampleApp
+            pod install
+            xcodebuild clean build \
+              -project ObjectiveCExampleApp.xcodeproj \
+              -configuration Release \
+              -sdk iphonesimulator
+  unit_test_sdk:
+    executor: macos
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/project
       - run:
           name: Install Sonar Build Wrapper
           command: |
             export SONARSCANNER_VERSION=4.3.0.2102
             curl -o /var/tmp/build-wrapper-macosx-x86.zip https://sonarcloud.io/static/cpp/build-wrapper-macosx-x86.zip
             unzip /var/tmp/build-wrapper-macosx-x86.zip -d /var/tmp
+            sudo mkdir -p /opt/sonar-scanner-${SONARSCANNER_VERSION}-macosx/bin
             sudo mv /var/tmp/build-wrapper-macosx-x86/* /opt/sonar-scanner-${SONARSCANNER_VERSION}-macosx/bin/
             rm -rf /var/tmp/build-wrapper-macosx-x86
             ln -s /opt/sonar-scanner-${SONARSCANNER_VERSION}-macosx/bin/build-wrapper-macosx-x86 /usr/local/bin/build-wrapper-macosx-x86
-
-jobs:
-  build_sdk:
-    executor: macos
-    steps:
-      - checkout
-      # - restore_cache:
-      #     keys:
-      #       - judokit-android-{{ checksum "judokit-android/build.gradle" }}
-      - run:
-          name: Carthage Update
-          command: carthage update
-      - run:
-          name: Build SDK
-          command: ./gradlew :judokit-android:build
-      # - save_cache:
-      #     key: judokit-android-{{ checksum "judokit-android/build.gradle" }}
-      #     paths:
-      #       - ./build/cache
-      # - persist_to_workspace:
-      #     root: .
-      #     paths:
-      #       - judokit-android/build
-
-  build_sample:
-    executor: macos
-    steps:
-      - checkout
-      - attach_workspace:
-          at: /home/circleci/project
-      - run:
-          name: Build Sample App
-          command: |
-            echo 1
-
-  unit_test_sdk:
-    executor: macos
-    steps:
-      - checkout
-      - attach_workspace:
-          at: /home/circleci/project
-      - install_sonar_build_wrapper
       - run:
           name: Run SDK Unit Tests
           command: |
-            build-wrapper-macosx-x86 --out-dir output bundle exec fastlane test
-
+            build-wrapper-macosx-x86 --out-dir output xcodebuild \
+              -project JudoKit_iOS.xcodeproj \
+              -scheme JudoKit_iOS \
+              -destination 'platform=iOS Simulator,name=iPhone 11' \
+              -derivedDataPath DerivedData \
+              test
+      - run:
+          name: Covert XCode Coverage Reports to SonarQube Format
+          command: |
+            curl -o xccov-to-sonarqube-generic.sh https://raw.githubusercontent.com/SonarSource/sonar-scanning-examples/master/swift-coverage/swift-coverage-example/xccov-to-sonarqube-generic.sh
+            chmod +x xccov-to-sonarqube-generic.sh
+            ./xccov-to-sonarqube-generic.sh DerivedData/Logs/Test/*.xcresult/ > DerivedData/sonarqube-generic-coverage.xml
+            rm xccov-to-sonarqube-generic.sh
+      - persist_to_workspace:
+          root: .
+          paths:
+            - DerivedData
   validate_podspec:
     executor: macos
     steps:
@@ -72,10 +113,8 @@ jobs:
           name: Validate PodSpec
           command: pod lib lint --no-subspecs --allow-warnings
 
-  # Below step not currently used as no unit tests have been written
   # unit_test_sample:
 
-  # Below step not currently used as no instrumented tests have been written
   # instrumented_test_sample:
 
   sonar_scan:
@@ -84,11 +123,11 @@ jobs:
         auth:
           username: _json_key
           password: $GCLOUD_SERVICE_KEY
-    working_directory: /home/circleci/project
+    working_directory: ~/project
     steps:
       - checkout
       - attach_workspace:
-          at: /home/circleci/project
+          at: ~/project
       - run: /opt/run-scan.sh
 
   release_sample:
@@ -96,7 +135,7 @@ jobs:
     steps:
       - checkout
       - attach_workspace:
-          at: /home/circleci/project
+          at: ~/project
       - run:
           name: Install Firebase CLI
           command: curl -sL https://firebase.tools | bash
